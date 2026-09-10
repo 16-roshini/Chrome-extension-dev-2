@@ -151,9 +151,9 @@ class OCRPIIPipeline:
 # Detections below their threshold are dropped before scoring.
 _OCR_MIN_BY_SOURCE: dict[str, float] = {
     "regex":      0.50,   # deterministic patterns — tolerates moderate OCR
-    "spacy_ner":  0.72,   # statistical model — needs fairly clean text
-    "context":    0.65,   # keyword heuristic — needs clear labels
-    "aggregated": 0.60,   # combined evidence — moderate threshold
+    "spacy_ner":  0.60,   # statistical model — lowered to catch valid NER on forms
+    "context":    0.55,   # keyword heuristic — lowered to catch password/name on forms
+    "aggregated": 0.55,   # combined evidence — moderate threshold
 }
 
 

@@ -165,6 +165,14 @@ def luhn_check(card_number: str) -> bool:
 # Keys are PIICategory values; values are trigger label words
 # ---------------------------------------------------------------------------
 CONTEXT_KEYWORDS: dict[str, list[str]] = {
+    "person_name": [
+        "full name", "name", "applicant name", "candidate name",
+        "student name", "employee name", "customer name",
+        "father name", "father's name", "mother name", "mother's name",
+        "mother s name", "father s name",
+        "guardian name", "spouse name", "nominee name",
+        "first name", "last name", "surname",
+    ],
     "password": [
         "password", "passwd", "pass", "pwd",
         "confirm password", "retype password", "new password",
@@ -178,6 +186,11 @@ CONTEXT_KEYWORDS: dict[str, list[str]] = {
         "address", "addr", "street", "locality", "city",
         "state", "pin code", "pincode", "zip", "residence",
         "permanent address", "current address",
+    ],
+    "organization": [
+        "employer", "organization", "organisation", "company",
+        "firm", "institution", "office", "workplace",
+        "employer name", "company name", "organization name",
     ],
     "bank_account": [
         "account number", "account no", "acc no", "acct",
