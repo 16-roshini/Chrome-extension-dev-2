@@ -109,18 +109,28 @@ class Aggregator:
         """
         Merge a group of same-category overlapping detections into one.
 
-        - Text + category: from highest-priority source.
+        - Text + span: from highest-priority source.
+          Exception: ADDRESS — uses the widest-span detection so the full
+          address string is preserved rather than just one city name.
         - Confidence: noisy-OR combination.
         - Source: AGGREGATED if >1 distinct sources, else original.
         - BBox: first non-None bbox in the group.
-        - Char span: narrowest span (use best detection's span, not widest).
-          Using the widest span was causing unrelated text to be included.
         """
         if len(group) == 1:
             return group[0]
 
         # Best = highest priority source
         best = max(group, key=lambda d: _SOURCE_PRIORITY.get(d.source, 0))
+
+        # For ADDRESS: prefer the detection with the widest char span.
+        # The context detector captures the full address string
+        # (e.g. "12-4-567, Green Park, Hyderabad, Telangana - 500016")
+        # while FusionLayer promotes individual city names.
+        # Using the widest span preserves the full address text.
+        if best.category == PIICategory.ADDRESS:
+            widest = max(group, key=lambda d: d.char_end - d.char_start)
+            if widest.char_end - widest.char_start > best.char_end - best.char_start:
+                best = widest
 
         combined_confidence = combine_scores([d.confidence for d in group])
 
@@ -135,8 +145,6 @@ class Aggregator:
             (d.bounding_box for d in group if d.bounding_box is not None), None
         )
 
-        # Use the best detection's span (not the widest) to avoid
-        # span inflation that previously swallowed nearby detections
         return PIIDetection(
             text=best.text,
             category=best.category,

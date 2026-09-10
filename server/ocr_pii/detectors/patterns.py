@@ -189,8 +189,10 @@ CONTEXT_KEYWORDS: dict[str, list[str]] = {
     ],
     "organization": [
         "employer", "organization", "organisation", "company",
-        "firm", "institution", "office", "workplace",
-        "employer name", "company name", "organization name",
+        "firm", "institution", "institute", "university", "college",
+        "school", "hospital", "agency", "corporation", "bank",
+        "office", "workplace", "employer name", "company name",
+        "organization name", "organisation name",
     ],
     "bank_account": [
         "account number", "account no", "acc no", "acct",

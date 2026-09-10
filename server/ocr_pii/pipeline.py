@@ -121,6 +121,12 @@ class OCRPIIPipeline:
         # --- Step 6: BBox mapping + per-entity rescore + OCR gate ---
         entities = _build_entities(aggregated, ocr_result)
 
+        # --- Step 7: Merge adjacent ADDRESS entities ---
+        # The FusionLayer promotes each GPE (city/state) independently,
+        # producing multiple ADDRESS entities for one logical address line.
+        # Merge them into one entity when they share the same OCR line.
+        entities = _merge_address_entities(entities)
+
         return DetectResponse(detections=entities)
 
     async def ocr_only(self, image_bytes: bytes) -> OCRResult:
@@ -209,6 +215,142 @@ def _build_entities(
         ))
 
     return entities
+
+
+# ---------------------------------------------------------------------------
+# ADDRESS entity merging
+# ---------------------------------------------------------------------------
+
+def _merge_address_entities(entities: List[PIIEntity]) -> List[PIIEntity]:
+    """
+    Merge adjacent ADDRESS PIIEntity objects that belong to the same
+    logical address line into a single entity.
+
+    Rationale:
+      The FusionLayer promotes each GPE (city, state) independently via
+      SPACY_GPE evidence, and the ContextDetector may also emit partial
+      address spans.  This produces multiple ADDRESS entries for a single
+      address like "12-4-567, Green Park, Hyderabad, Telangana - 500016".
+
+    Merge criteria (any one sufficient):
+      1. Spatial: both have bboxes and share the same Y-line
+         (|y1_a - y1_b| <= _ADDR_Y_TOLERANCE pixels).
+      2. No spatial info: consecutive ADDRESS entities in the output list
+         are merged when they appear without any intervening non-ADDRESS
+         entity between them (text-order proximity).
+
+    Merged entity:
+      - type:           ADDRESS
+      - text:           addresses joined with ", " (deduplication of overlaps)
+      - bbox:           enclosing rectangle of all merged bboxes
+      - ocr_confidence: average of individual confidences
+      - pii_score:      maximum of individual pii_scores
+
+    Non-ADDRESS entities are passed through unchanged.
+    """
+    if not entities:
+        return entities
+
+    # Pixel tolerance for "same line" Y comparison
+    _ADDR_Y_TOLERANCE = 15
+
+    result: List[PIIEntity] = []
+    i = 0
+
+    while i < len(entities):
+        entity = entities[i]
+
+        # Not an address — pass through as-is
+        if entity.type != "ADDRESS":
+            result.append(entity)
+            i += 1
+            continue
+
+        # Start a merge group with this address entity
+        group: List[PIIEntity] = [entity]
+        j = i + 1
+
+        while j < len(entities):
+            candidate = entities[j]
+
+            if candidate.type != "ADDRESS":
+                break  # stop at non-address entities
+
+            # Decide whether to merge this candidate into the group
+            should_merge = False
+
+            # Both have bboxes — use spatial proximity
+            if group[-1].bbox is not None and candidate.bbox is not None:
+                last_y1 = group[-1].bbox[1]
+                cand_y1 = candidate.bbox[1]
+                if abs(last_y1 - cand_y1) <= _ADDR_Y_TOLERANCE:
+                    should_merge = True
+            else:
+                # No spatial info — merge consecutive ADDRESS entities
+                should_merge = True
+
+            if should_merge:
+                group.append(candidate)
+                j += 1
+            else:
+                break
+
+        if len(group) == 1:
+            # Nothing to merge
+            result.append(group[0])
+        else:
+            # Merge the group into one ADDRESS entity
+            merged = _merge_address_group(group)
+            result.append(merged)
+
+        i = j if len(group) > 1 else i + 1
+
+    return result
+
+
+def _merge_address_group(group: List[PIIEntity]) -> PIIEntity:
+    """
+    Combine a list of ADDRESS PIIEntity objects into one.
+
+    - text:           smart join that avoids duplicating overlapping substrings
+    - bbox:           enclosing [min_x1, min_y1, max_x2, max_y2]
+    - ocr_confidence: average
+    - pii_score:      maximum (the group collectively is high-confidence)
+    """
+    # Build combined text — skip fragments already contained in a previous part
+    parts: List[str] = []
+    accumulated = ""
+    for e in group:
+        frag = e.text.strip().strip(",").strip()
+        if frag and frag.lower() not in accumulated.lower():
+            parts.append(frag)
+            accumulated = (accumulated + " " + frag).strip()
+
+    combined_text = ", ".join(parts)
+
+    # Merge bboxes
+    boxes = [e.bbox for e in group if e.bbox is not None]
+    if boxes:
+        x1 = min(b[0] for b in boxes)
+        y1 = min(b[1] for b in boxes)
+        x2 = max(b[2] for b in boxes)
+        y2 = max(b[3] for b in boxes)
+        merged_bbox: Optional[List[int]] = [x1, y1, x2, y2]
+    else:
+        merged_bbox = None
+
+    avg_ocr_conf = round(
+        sum(e.ocr_confidence for e in group) / len(group), 4
+    )
+    max_pii_score = round(max(e.pii_score for e in group), 4)
+
+    return PIIEntity(
+        type="ADDRESS",
+        text=combined_text,
+        bbox=merged_bbox,
+        ocr_confidence=avg_ocr_conf,
+        pii_score=max_pii_score,
+    )
 
 
 # ---------------------------------------------------------------------------
